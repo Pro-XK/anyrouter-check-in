@@ -30,7 +30,6 @@ async def test_browser_check_in_validates_response_and_closes_browser(monkeypatc
 	monkeypatch.setattr(checkin, 'get_playwright_proxy', lambda **kwargs: None)
 	provider = AppConfig.load_from_env().get_provider('agentrouter')
 	account = AccountConfig(cookies={'session': 'test-session'}, api_user='12345', provider='agentrouter')
-	assert isinstance(account.cookies, dict)
 	result = await checkin.run_agentrouter_browser_check_in(account.cookies, account, provider)
 	assert result[0] is success
 	browser.close.assert_awaited_once()
