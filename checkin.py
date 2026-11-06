@@ -396,7 +396,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 
 	print(f'[AUTH] {account_name}: Using auth method -> {auth_method}')
 
-	result = run_check_in_requests(
+	return run_check_in_requests(
 		all_cookies,
 		account,
 		account_name,
@@ -404,64 +404,6 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		api_user_override=resolved_api_user,
 		use_proxy=provider_config.use_proxy,
 	)
-	if not result[0] and account.provider == 'agentrouter':
-		print(f'[INFO] {account_name}: Retrying automatic check-in inside the browser')
-		return await run_agentrouter_browser_check_in(all_cookies, account, provider_config, api_user=resolved_api_user)
-	return result
-
-
-async def run_agentrouter_browser_check_in(
-	cookies: dict, account: AccountConfig, provider_config, *, api_user: str | None = None
-):
-	"""保留浏览器的网络指纹，避免 WAF 拒绝独立 HTTP 客户端。"""
-	launch_kwargs: dict = {'headless': True}
-	proxy = get_playwright_proxy(use_proxy=provider_config.use_proxy)
-	if proxy:
-		launch_kwargs['proxy'] = proxy
-	browser = None
-	try:
-		browser = await launch_async(**launch_kwargs)
-		page = await browser.new_page()
-		await page.context.add_cookies(
-			[{'name': name, 'value': value, 'url': provider_config.domain} for name, value in cookies.items()]
-		)
-		await prepare_browser_page(page)
-		await page.goto(
-			f'{provider_config.domain}{provider_config.login_path}', wait_until='domcontentloaded', timeout=120000
-		)
-		await wait_for_waf_ready(page)
-		response = await page.evaluate(
-			"""async ({path, headers}) => {
-				const response = await fetch(path, {headers, credentials: 'include', signal: AbortSignal.timeout(30000)});
-				return {status: response.status, body: await response.text()};
-			}""",
-			{
-				'path': provider_config.user_info_path,
-				'headers': {provider_config.api_user_key: str(api_user or account.api_user)},
-			},
-		)
-		if response['status'] != 200:
-			raise ValueError(f'Browser user info request returned HTTP {response["status"]}')
-		data = json.loads(response['body'])
-		if not data.get('success'):
-			raise ValueError('Browser session was not accepted')
-		user_data = data['data']
-		quota = round(user_data.get('quota', 0) / 500000, 2)
-		used_quota = round(user_data.get('used_quota', 0) / 500000, 2)
-		info = {
-			'success': True,
-			'quota': quota,
-			'used_quota': used_quota,
-			'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
-		}
-		print(f'[SUCCESS] AgentRouter: Browser automatic check-in completed; {info["display"]}')
-		return True, None, info
-	except Exception as exc:
-		print(f'[FAILED] AgentRouter: Browser check-in failed: {str(exc)[:100]}')
-		return False, None, {'success': False, 'error': 'Browser automatic check-in failed'}
-	finally:
-		if browser is not None:
-			await browser.close()
 
 
 def run_check_in_requests(
